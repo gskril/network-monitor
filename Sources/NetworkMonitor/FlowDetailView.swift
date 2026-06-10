@@ -4,6 +4,7 @@ import SwiftUI
 /// Inspector panel showing everything the kernel exposes about a flow.
 struct FlowDetailView: View {
     let row: FlowRow
+    @State private var copied = false
 
     private static let byteFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
@@ -25,6 +26,14 @@ struct FlowDetailView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    Spacer()
+                    Button {
+                        copyToPasteboard()
+                    } label: {
+                        Label(copied ? "Copied" : "Copy",
+                              systemImage: copied ? "checkmark" : "doc.on.doc")
+                    }
+                    .help("Copy all details for this connection (e.g. to paste into a chat)")
                 }
                 if let path = row.processPath {
                     verticalRow("Path", path, font: .caption.monospaced())
@@ -175,6 +184,62 @@ struct FlowDetailView: View {
 
     private func rttText(_ seconds: Double) -> String {
         String(format: "%.1f ms", seconds * 1000)
+    }
+
+    private func copyToPasteboard() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(copyableText(), forType: .string)
+        copied = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.5))
+            copied = false
+        }
+    }
+
+    /// A plain-text dump of everything known about the flow, suitable for
+    /// pasting into a chat or bug report. Only includes fields that have data.
+    private func copyableText() -> String {
+        let timestamp = DateFormatter()
+        timestamp.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+
+        var lines: [String] = ["Network Monitor — connection details"]
+        func add(_ label: String, _ value: String?) {
+            if let value, !value.isEmpty { lines.append("\(label): \(value)") }
+        }
+
+        add("Process", "\(row.processName) (PID \(row.pid))")
+        add("Path", row.processPath)
+        add("Type", "\(row.kind.rawValue) (\(row.provider))")
+        add("State", row.stateDisplay)
+        if row.count > 1 { add("Coalesced flows", "\(row.count) (\(row.openCount) open)") }
+        add("Interface", interfaceText == "—" ? nil : interfaceText)
+
+        if row.remoteHost != nil {
+            add(row.remoteHostAuthoritative ? "Hostname (from DNS)" : "Hostname (reverse DNS)", row.remoteHost)
+        }
+        if let remote = row.remote, !remote.isUnspecified {
+            add("Remote", "\(remote.ip):\(remote.port)")
+        }
+        if let local = row.local { add("Local", "\(local.ip):\(local.port)") }
+
+        if let location = row.location {
+            add("Estimated region", "\(row.regionDisplay ?? "Unknown") (\(String(format: "%.3f, %.3f", location.latitude, location.longitude)))")
+        }
+
+        add("First seen", timestamp.string(from: row.startedAt))
+        add("Last seen", timestamp.string(from: row.lastSeenAt))
+        add("Duration", durationText)
+
+        add("Sent", trafficText(bytes: row.txBytes, packets: row.stats.txPackets))
+        add("Received", trafficText(bytes: row.rxBytes, packets: row.stats.rxPackets))
+        if row.stats.retransmittedBytes > 0 {
+            add("Retransmitted", Self.byteFormatter.string(fromByteCount: Int64(row.stats.retransmittedBytes)))
+        }
+        if let rtt = row.stats.rttAverage { add("RTT (avg)", rttText(rtt)) }
+        if let rtt = row.stats.rttMinimum { add("RTT (min)", rttText(rtt)) }
+        add("Congestion control", row.stats.congestionAlgorithm)
+
+        return lines.joined(separator: "\n")
     }
 
     /// Regional-indicator flag emoji from an ISO 3166-1 alpha-2 code.
