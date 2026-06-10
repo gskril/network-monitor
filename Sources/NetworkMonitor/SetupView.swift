@@ -103,7 +103,7 @@ struct SetupView: View {
                 try await HostnameHelperInstaller.install()
                 helperInstalled = true
                 needsRelaunch = !isHostnamesActive
-                helperMessage = "If hostnames don't appear after relaunch, log out and back in once so your account joins the access_bpf group."
+                helperMessage = "If hostnames don't appear after relaunch, log out and back in once so your account joins the Network Monitor BPF group."
             } catch SetupError.cancelled {
                 helperMessage = "Cancelled."
             } catch {

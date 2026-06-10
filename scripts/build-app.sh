@@ -23,7 +23,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleExecutable</key>
 	<string>NetworkMonitor</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.greg.networkmonitor</string>
+	<string>com.gregskril.networkmonitor</string>
 	<key>CFBundleName</key>
 	<string>Network Monitor</string>
 	<key>CFBundlePackageType</key>

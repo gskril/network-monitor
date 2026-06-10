@@ -25,10 +25,8 @@ struct ContentView: View {
     @EnvironmentObject private var store: FlowStore
     @State private var searchText = ""
     @State private var selectedID: FlowRow.ID?
-    @AppStorage("inspectorWidth") private var inspectorWidth = 360.0
     @AppStorage("viewMode") private var viewMode = ViewMode.list
     @State private var showingSetup = false
-    @State private var liveInspectorWidth: CGFloat = 0
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -56,32 +54,7 @@ struct ContentView: View {
             .inspector(isPresented: inspectorShown) {
                 if let row = store.row(selectedID) {
                     FlowDetailView(row: row)
-                        .inspectorColumnWidth(min: 300, ideal: CGFloat(inspectorWidth), max: 560)
-                        .background {
-                            // The system doesn't persist inspector width, so we
-                            // track the live width here and commit it the moment
-                            // selection changes (see .onChange below) — before
-                            // the close animation shrinks it.
-                            GeometryReader { proxy in
-                                Color.clear.onChange(of: proxy.size.width) { _, width in
-                                    if (300...560).contains(width) { liveInspectorWidth = width }
-                                }
-                            }
-                        }
-                }
-            }
-            // Commit the width when the inspector closes or switches rows. At
-            // this instant liveInspectorWidth is still the user's chosen size;
-            // the close animation (which would shrink it) hasn't run yet.
-            .onChange(of: selectedID) { old, _ in
-                if old != nil, (300...560).contains(liveInspectorWidth) {
-                    inspectorWidth = Double(liveInspectorWidth)
-                }
-            }
-            // Also persist if the app quits with the inspector still open.
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-                if selectedID != nil, (300...560).contains(liveInspectorWidth) {
-                    inspectorWidth = Double(liveInspectorWidth)
+                        .inspectorColumnWidth(min: 300, ideal: 360, max: 560)
                 }
             }
             .searchable(text: $searchText, placement: .toolbar, prompt: "Filter by process, host, port, type")

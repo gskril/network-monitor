@@ -21,24 +21,29 @@ if [ -z "$USER_NAME" ] || [ "$USER_NAME" = "root" ]; then
     exit 1
 fi
 
-GROUP="access_bpf"
-LABEL="com.greg.networkmonitor.chmodbpf"
+GROUP="gregskril_networkmonitor_bpf"
+LABEL="com.gregskril.networkmonitor.chmodbpf"
+LEGACY_LABEL="com.greg.networkmonitor.chmodbpf"
 SUPPORT_DIR="/Library/Application Support/NetworkMonitor"
 SCRIPT_PATH="$SUPPORT_DIR/ChmodBPF.sh"
 PLIST_PATH="/Library/LaunchDaemons/$LABEL.plist"
+LEGACY_PLIST_PATH="/Library/LaunchDaemons/$LEGACY_LABEL.plist"
+GROUP_MARKER="$SUPPORT_DIR/created-$GROUP"
 
 echo "• Ensuring group '$GROUP' exists and adding '$USER_NAME'…"
 if ! dseditgroup -o read "$GROUP" >/dev/null 2>&1; then
     dseditgroup -o create -r "Network Monitor BPF access" "$GROUP"
+    mkdir -p "$SUPPORT_DIR"
+    touch "$GROUP_MARKER"
 fi
 dseditgroup -o edit -a "$USER_NAME" -t user "$GROUP"
 
 echo "• Installing chmod script to $SCRIPT_PATH…"
 mkdir -p "$SUPPORT_DIR"
-cat > "$SCRIPT_PATH" <<'EOS'
+cat > "$SCRIPT_PATH" <<EOS
 #!/bin/sh
-# Relax /dev/bpf* permissions to the access_bpf group.
-GROUP="access_bpf"
+# Relax /dev/bpf* permissions to the Network Monitor BPF group.
+GROUP="$GROUP"
 dseditgroup -o read "$GROUP" >/dev/null 2>&1 || exit 0
 for dev in /dev/bpf*; do
     [ -e "$dev" ] || continue
@@ -50,6 +55,10 @@ chmod 755 "$SCRIPT_PATH"
 chown root:wheel "$SCRIPT_PATH"
 
 echo "• Installing LaunchDaemon to $PLIST_PATH…"
+if [ -e "$LEGACY_PLIST_PATH" ]; then
+    launchctl unload "$LEGACY_PLIST_PATH" 2>/dev/null || true
+    rm -f "$LEGACY_PLIST_PATH"
+fi
 cat > "$PLIST_PATH" <<EOS
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

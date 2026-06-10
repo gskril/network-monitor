@@ -110,10 +110,12 @@ enum GeoDataInstaller {
 /// Installs the BPF helper (for true hostnames) by running the bundled script
 /// through macOS's standard administrator-authentication prompt.
 enum HostnameHelperInstaller {
+    private static let helperLabel = "com.gregskril.networkmonitor.chmodbpf"
+
     /// True once the helper's LaunchDaemon is installed (independent of whether
     /// the current login session has picked up the group yet).
     static var isInstalled: Bool {
-        FileManager.default.fileExists(atPath: "/Library/LaunchDaemons/com.greg.networkmonitor.chmodbpf.plist")
+        FileManager.default.fileExists(atPath: "/Library/LaunchDaemons/\(helperLabel).plist")
     }
 
     static func install() async throws {
@@ -129,8 +131,10 @@ enum HostnameHelperInstaller {
             throw SetupError.message("Couldn't find \(name).sh. Run it from the scripts/ folder manually.")
         }
         let user = NSUserName()
-        // Run: sh '<script>' '<user>'  — the install script reads $1 as the user.
-        let command = "/bin/sh '\(scriptURL.path)' '\(user)'"
+        // Run through `do shell script`, so quote arguments for /bin/sh -c.
+        let command = ["/bin/sh", scriptURL.path, user]
+            .map(shellEscaped)
+            .joined(separator: " ")
         try await runWithAdminPrivileges(command)
     }
 
@@ -144,6 +148,10 @@ enum HostnameHelperInstaller {
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("scripts/\(name).sh")
         return FileManager.default.fileExists(atPath: devPath.path) ? devPath : nil
+    }
+
+    private static func shellEscaped(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     private static func runWithAdminPrivileges(_ command: String) async throws {

@@ -47,7 +47,7 @@ final class DNSSniffer: @unchecked Sendable {
 
     func start() {
         let thread = Thread { [weak self] in self?.run() }
-        thread.name = "com.greg.networkmonitor.dns"
+        thread.name = "com.gregskril.networkmonitor.dns"
         thread.stackSize = 1 << 20
         self.thread = thread
         thread.start()

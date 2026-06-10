@@ -9,7 +9,7 @@ final class FlowMonitor {
         case removed(id: UInt64)
     }
 
-    private let queue = DispatchQueue(label: "com.greg.networkmonitor.nstat")
+    private let queue = DispatchQueue(label: "com.gregskril.networkmonitor.nstat")
     private let onEvent: (Event) -> Void
     private var manager: UnsafeMutableRawPointer?
     private var activeSources: [UnsafeMutableRawPointer: UInt64] = [:]

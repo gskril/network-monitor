@@ -36,6 +36,14 @@ scripts/fetch-geoip.sh   # downloads ~120MB to ~/Library/Application Support/Net
 
 Without it the app runs fine; the Map view shows "no located connections" and the inspector omits the region section. Locations are city-level estimates from IP allocation — approximate, not exact.
 
+## Requirements
+
+- macOS 14 or newer.
+- Xcode or Apple's Command Line Tools, including SwiftPM (`swift` on your `PATH`).
+- No third-party package dependencies. The optional DNS hostname helper uses macOS's built-in `libpcap`, and the optional location database is downloaded separately.
+
+The app uses Apple's private `NetworkStatistics.framework`, the same framework behind `nettop` and Activity Monitor's network view. It works without root on supported macOS versions, but because the API is private it can change or break in future macOS releases.
+
 ## Setup panel
 
 Both optional capabilities below can be enabled from inside the app — click the gear (or the "DNS names" status) in the footer to open **Setup**:
@@ -47,7 +55,7 @@ The command-line scripts below do the same thing if you prefer.
 
 ## True hostnames (optional)
 
-By default hostnames are best-effort reverse DNS, which often shows a CDN's name (`ec2-….amazonaws.com`) rather than the site an app actually contacted. To show the real requested hostname, the app can passively watch DNS responses — but that needs read access to BPF devices, which is root-only on macOS. Install the one-time helper (Wireshark's "ChmodBPF" approach: a LaunchDaemon that grants a dedicated `access_bpf` group access to `/dev/bpf*`):
+By default hostnames are best-effort reverse DNS, which often shows a CDN's name (`ec2-….amazonaws.com`) rather than the site an app actually contacted. To show the real requested hostname, the app can passively watch DNS responses — but that needs read access to BPF devices, which is root-only on macOS. Install the one-time helper (Wireshark's "ChmodBPF" approach: a LaunchDaemon that grants a dedicated Network Monitor BPF group access to `/dev/bpf*`):
 
 ```sh
 sudo scripts/install-bpf-helper.sh   # one time; may require logout/login once
@@ -59,12 +67,17 @@ Without the helper the app runs fine and shows "DNS names off", using reverse DN
 
 ## Build & run
 
+From a fresh clone:
+
 ```sh
+git clone <repo-url>
+cd network-monitor
+swift test                 # optional sanity check
 swift run                  # dev run
 ./scripts/build-app.sh     # builds dist/NetworkMonitor.app (ad-hoc signed)
 ```
 
-Requires macOS 14+. Tested on macOS 26.3 / Xcode 26.5.
+Optional features can be enabled later from the in-app Setup panel or with the scripts above. Tested on macOS 26.3 / Xcode 26.5.
 
 ## Honest comparison with Little Snitch Mini
 
