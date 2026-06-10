@@ -141,10 +141,26 @@ enum FlowKind: String {
     }
 }
 
-/// A row in the UI: one flow, updated in place as its state evolves.
+/// Identity used to coalesce repeated flows (e.g. a burst of UDP probes from
+/// one process to the same destination) into a single row with a counter.
+struct FlowKey: Hashable {
+    var pid: Int32
+    var processName: String
+    var remoteIP: String
+    var remotePort: UInt16
+    var provider: String
+}
+
+/// A row in the UI: one flow (or a group of coalesced identical flows),
+/// updated in place as its state evolves.
 struct FlowRow: Identifiable {
     let id: UInt64
     var startedAt: Date
+    var lastSeenAt: Date
+    var count: Int
+    var openCount: Int
+    var members: [UInt64]
+    var key: FlowKey?
     var preexisting: Bool
     var processName: String
     var pid: Int32

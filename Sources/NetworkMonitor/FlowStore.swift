@@ -4,6 +4,10 @@ import SwiftUI
 /// Main-actor model behind the UI. Monitor events are buffered on the
 /// monitor's queue and applied in coalesced batches so a burst of flow
 /// updates doesn't trigger thousands of SwiftUI invalidations.
+///
+/// Repeated identical flows (same process → same remote endpoint, within
+/// `mergeWindow`) collapse into one row with a ×N counter instead of
+/// flooding the list — e.g. a process firing 20 UDP probes in a burst.
 @MainActor
 final class FlowStore: ObservableObject {
     @Published private(set) var rows: [FlowRow] = []
@@ -17,8 +21,13 @@ final class FlowStore: ObservableObject {
     @AppStorage("showPreexisting") var showPreexisting = true
 
     private let maxRows = 5000
-    private var byID: [UInt64: FlowRow] = [:]
-    private var order: [UInt64] = [] // newest first
+    private let mergeWindow: TimeInterval = 30
+
+    private var byID: [UInt64: FlowRow] = [:]          // row id → row
+    private var order: [UInt64] = []                   // row ids, newest activity first
+    private var sourceToRow: [UInt64: UInt64] = [:]    // kernel source id → row id
+    private var sourceTraffic: [UInt64: (rx: UInt64, tx: UInt64)] = [:]
+    private var keyToRow: [FlowKey: UInt64] = [:]      // coalescing target per identity
     private var dnsInFlight: Set<String> = []
     private let launchDate = Date()
 
@@ -54,6 +63,9 @@ final class FlowStore: ObservableObject {
     func clear() {
         byID.removeAll()
         order.removeAll()
+        sourceToRow.removeAll()
+        sourceTraffic.removeAll()
+        keyToRow.removeAll()
         rows = []
     }
 
@@ -71,88 +83,212 @@ final class FlowStore: ObservableObject {
         }
     }
 
+    // MARK: - Event application
+
     private func flush() {
         let events = pending.drain()
         guard !events.isEmpty else { return }
         for event in events {
             switch event {
             case .description(let id, let description, let receivedAt):
-                apply(id: id, description: description, receivedAt: receivedAt)
+                apply(sourceID: id, description: description, receivedAt: receivedAt)
             case .removed(let id):
-                if var row = byID[id] {
-                    row.isClosed = true
-                    byID[id] = row
-                }
+                applyRemoval(sourceID: id)
             }
         }
-        if order.count > maxRows {
-            let dropped = order[maxRows...]
-            for id in dropped { byID.removeValue(forKey: id) }
-            order.removeSubrange(maxRows...)
-        }
+        pruneIfNeeded()
         rows = order.compactMap { byID[$0] }
     }
 
-    private func apply(id: UInt64, description: FlowDescription, receivedAt: Date) {
-        if var row = byID[id] {
-            if let remote = description.remote { row.remote = remote }
-            if let state = description.tcpState { row.tcpState = state }
-            if let rx = description.rxBytes { row.rxBytes = rx }
-            if let tx = description.txBytes { row.txBytes = tx }
-            if let index = description.interfaceIndex, row.interfaceName == nil {
-                row.interfaceName = interfaceName(forIndex: index)
-            }
-            row.kind = FlowKind.classify(
-                provider: description.provider ?? row.provider,
-                tcpState: row.tcpState,
-                remote: row.remote,
-                local: row.local
-            )
-            byID[id] = row
-            resolveHostIfNeeded(for: row)
+    private func apply(sourceID: UInt64, description: FlowDescription, receivedAt: Date) {
+        if let rowID = sourceToRow[sourceID] {
+            update(rowID: rowID, sourceID: sourceID, with: description)
         } else {
-            // The kernel's start stamp is coarse, so flows discovered together
-            // would collide; arrival time is exact for flows born after launch.
-            let kernelStart = description.startMachTime.map(MachTime.toDate)
-            let preexisting = (kernelStart ?? receivedAt) < launchDate.addingTimeInterval(-1)
-            let startedAt = preexisting ? (kernelStart ?? receivedAt) : receivedAt
-            let row = FlowRow(
-                id: id,
-                startedAt: startedAt,
-                preexisting: preexisting,
-                processName: description.processName ?? "unknown",
-                pid: description.pid ?? 0,
-                provider: description.provider ?? "?",
-                tcpState: description.tcpState,
-                local: description.local,
-                remote: description.remote,
-                remoteHost: nil,
-                interfaceName: description.interfaceIndex.flatMap(interfaceName(forIndex:)),
-                rxBytes: description.rxBytes ?? 0,
-                txBytes: description.txBytes ?? 0,
-                isClosed: false,
-                kind: FlowKind.classify(
-                    provider: description.provider,
-                    tcpState: description.tcpState,
-                    remote: description.remote,
-                    local: description.local
-                )
-            )
-            byID[id] = row
-            insertSorted(id: id, startedAt: startedAt)
-            totalSeen += 1
-            resolveHostIfNeeded(for: row)
+            addSource(sourceID: sourceID, description: description, receivedAt: receivedAt)
         }
     }
 
-    private func insertSorted(id: UInt64, startedAt: Date) {
-        // New flows are almost always the newest, so scan from the front.
+    private func addSource(sourceID: UInt64, description: FlowDescription, receivedAt: Date) {
+        totalSeen += 1
+        let key = makeKey(description: description)
+
+        // Coalesce into an existing row for the same identity seen recently.
+        if let key, let targetID = keyToRow[key], var target = byID[targetID],
+           receivedAt.timeIntervalSince(target.lastSeenAt) < mergeWindow {
+            sourceToRow[sourceID] = targetID
+            target.count += 1
+            target.openCount += 1
+            target.members.append(sourceID)
+            target.lastSeenAt = receivedAt
+            target.isClosed = false
+            if let state = description.tcpState { target.tcpState = state }
+            byID[targetID] = target
+            addTrafficDelta(rowID: targetID, sourceID: sourceID, description: description)
+            bump(rowID: targetID)
+            return
+        }
+
+        // The kernel's start stamp is coarse, so flows discovered together
+        // would collide; arrival time is exact for flows born after launch.
+        let kernelStart = description.startMachTime.map(MachTime.toDate)
+        let preexisting = (kernelStart ?? receivedAt) < launchDate.addingTimeInterval(-1)
+        let startedAt = preexisting ? (kernelStart ?? receivedAt) : receivedAt
+
+        var row = FlowRow(
+            id: sourceID,
+            startedAt: startedAt,
+            lastSeenAt: startedAt,
+            count: 1,
+            openCount: 1,
+            members: [sourceID],
+            key: key,
+            preexisting: preexisting,
+            processName: description.processName ?? "unknown",
+            pid: description.pid ?? 0,
+            provider: description.provider ?? "?",
+            tcpState: description.tcpState,
+            local: description.local,
+            remote: description.remote,
+            remoteHost: nil,
+            interfaceName: description.interfaceIndex.flatMap(interfaceName(forIndex:)),
+            rxBytes: 0,
+            txBytes: 0,
+            isClosed: false,
+            kind: .udp
+        )
+        row.kind = classify(description: description, row: row)
+        byID[sourceID] = row
+        sourceToRow[sourceID] = sourceID
+        if let key { keyToRow[key] = sourceID }
+        insertSorted(id: sourceID, lastSeenAt: row.lastSeenAt)
+        addTrafficDelta(rowID: sourceID, sourceID: sourceID, description: description)
+        resolveHostIfNeeded(for: row)
+    }
+
+    private func update(rowID: UInt64, sourceID: UInt64, with description: FlowDescription) {
+        guard var row = byID[rowID] else { return }
+
+        let hadRemote = row.hasRemote
+        if let remote = description.remote { row.remote = remote }
+        if let state = description.tcpState { row.tcpState = state }
+        if let index = description.interfaceIndex, row.interfaceName == nil {
+            row.interfaceName = interfaceName(forIndex: index)
+        }
+        row.kind = classify(description: description, row: row)
+
+        // The flow's remote endpoint just resolved: it now has a coalescing
+        // identity. Merge into a recent matching row, or register as the
+        // coalescing target for future repeats.
+        if !hadRemote, row.hasRemote, row.key == nil, let key = makeKey(description: description, fallback: row) {
+            if let targetID = keyToRow[key], targetID != rowID, var target = byID[targetID],
+               row.lastSeenAt.timeIntervalSince(target.lastSeenAt) < mergeWindow {
+                target.count += row.count
+                target.openCount += row.openCount
+                target.members.append(contentsOf: row.members)
+                target.lastSeenAt = max(target.lastSeenAt, row.lastSeenAt)
+                target.isClosed = false
+                target.rxBytes += row.rxBytes
+                target.txBytes += row.txBytes
+                if let state = row.tcpState { target.tcpState = state }
+                byID[targetID] = target
+                for member in row.members { sourceToRow[member] = targetID }
+                byID.removeValue(forKey: rowID)
+                order.removeAll { $0 == rowID }
+                addTrafficDelta(rowID: targetID, sourceID: sourceID, description: description)
+                bump(rowID: targetID)
+                return
+            }
+            row.key = key
+            keyToRow[key] = rowID
+        }
+
+        byID[rowID] = row
+        addTrafficDelta(rowID: rowID, sourceID: sourceID, description: description)
+        resolveHostIfNeeded(for: row)
+    }
+
+    private func applyRemoval(sourceID: UInt64) {
+        sourceTraffic.removeValue(forKey: sourceID)
+        guard let rowID = sourceToRow.removeValue(forKey: sourceID), var row = byID[rowID] else { return }
+        row.openCount -= 1
+        if row.openCount <= 0 {
+            row.openCount = 0
+            row.isClosed = true
+        }
+        byID[rowID] = row
+    }
+
+    /// Byte counts arrive as per-source cumulative totals; rows accumulate
+    /// deltas so coalesced rows show the group's combined traffic.
+    private func addTrafficDelta(rowID: UInt64, sourceID: UInt64, description: FlowDescription) {
+        guard description.rxBytes != nil || description.txBytes != nil else { return }
+        let rx = description.rxBytes ?? 0
+        let tx = description.txBytes ?? 0
+        let last = sourceTraffic[sourceID] ?? (0, 0)
+        sourceTraffic[sourceID] = (rx, tx)
+        guard var row = byID[rowID] else { return }
+        if rx > last.rx { row.rxBytes += rx - last.rx }
+        if tx > last.tx { row.txBytes += tx - last.tx }
+        byID[rowID] = row
+    }
+
+    private func makeKey(description: FlowDescription, fallback: FlowRow? = nil) -> FlowKey? {
+        guard let remote = description.remote ?? fallback?.remote,
+              !remote.isUnspecified, remote.port != 0 else { return nil }
+        return FlowKey(
+            pid: description.pid ?? fallback?.pid ?? 0,
+            processName: description.processName ?? fallback?.processName ?? "unknown",
+            remoteIP: remote.ip,
+            remotePort: remote.port,
+            provider: description.provider ?? fallback?.provider ?? "?"
+        )
+    }
+
+    private func classify(description: FlowDescription, row: FlowRow) -> FlowKind {
+        FlowKind.classify(
+            provider: description.provider ?? row.provider,
+            tcpState: description.tcpState ?? row.tcpState,
+            remote: description.remote ?? row.remote,
+            local: description.local ?? row.local
+        )
+    }
+
+    // MARK: - Ordering
+
+    private func insertSorted(id: UInt64, lastSeenAt: Date) {
+        // New activity is almost always the newest, so scan from the front.
         var index = 0
-        while index < order.count, let existing = byID[order[index]], existing.startedAt > startedAt {
+        while index < order.count, let existing = byID[order[index]], existing.lastSeenAt > lastSeenAt {
             index += 1
         }
         order.insert(id, at: index)
     }
+
+    /// Moves a row that just saw new activity back to its sorted position
+    /// (usually the top).
+    private func bump(rowID: UInt64) {
+        guard let row = byID[rowID] else { return }
+        order.removeAll { $0 == rowID }
+        insertSorted(id: rowID, lastSeenAt: row.lastSeenAt)
+    }
+
+    private func pruneIfNeeded() {
+        guard order.count > maxRows else { return }
+        let dropped = order[maxRows...]
+        for rowID in dropped {
+            guard let row = byID.removeValue(forKey: rowID) else { continue }
+            for member in row.members {
+                sourceToRow.removeValue(forKey: member)
+                sourceTraffic.removeValue(forKey: member)
+            }
+            if let key = row.key, keyToRow[key] == rowID {
+                keyToRow.removeValue(forKey: key)
+            }
+        }
+        order.removeSubrange(maxRows...)
+    }
+
+    // MARK: - Reverse DNS
 
     private func resolveHostIfNeeded(for row: FlowRow) {
         guard row.hasRemote, row.remoteHost == nil, let remote = row.remote else { return }

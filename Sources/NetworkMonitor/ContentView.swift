@@ -22,13 +22,22 @@ struct ContentView: View {
 
         Table(visible) {
             TableColumn("Time") { row in
-                Text(Self.timeFormatter.string(from: row.startedAt))
-                    .font(.system(.body, design: .monospaced))
-                    .foregroundStyle(row.preexisting ? .secondary : .primary)
-                    .help(row.startedAt.formatted(date: .abbreviated, time: .standard)
-                          + (row.preexisting ? " (started before launch)" : ""))
+                HStack(spacing: 5) {
+                    Text(Self.timeFormatter.string(from: row.lastSeenAt))
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(row.preexisting ? .secondary : .primary)
+                    if row.count > 1 {
+                        Text("×\(row.count)")
+                            .font(.caption2.weight(.bold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(.quaternary, in: Capsule())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .help(timeHelp(for: row))
             }
-            .width(min: 90, ideal: 100, max: 120)
+            .width(min: 90, ideal: 130, max: 160)
 
             TableColumn("Process") { row in
                 HStack(spacing: 6) {
@@ -118,6 +127,17 @@ struct ContentView: View {
             statusBar(visibleCount: visible.count)
         }
         .navigationTitle("Network Monitor")
+    }
+
+    private func timeHelp(for row: FlowRow) -> String {
+        var help = row.lastSeenAt.formatted(date: .abbreviated, time: .standard)
+        if row.count > 1 {
+            help += " — \(row.count) flows since \(Self.timeFormatter.string(from: row.startedAt))"
+        }
+        if row.preexisting {
+            help += " (started before launch)"
+        }
+        return help
     }
 
     private func trafficText(for row: FlowRow) -> String {
