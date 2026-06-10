@@ -28,6 +28,7 @@ struct ContentView: View {
     @AppStorage("inspectorWidth") private var inspectorWidth = 360.0
     @AppStorage("viewMode") private var viewMode = ViewMode.list
     @State private var showingSetup = false
+    @State private var widthCommitTask: Task<Void, Never>?
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -51,11 +52,14 @@ struct ContentView: View {
                     FlowDetailView(row: row)
                         .inspectorColumnWidth(min: 300, ideal: CGFloat(inspectorWidth), max: 560)
                         .background {
-                            // The system doesn't persist inspector width; track
-                            // it so reopening restores the user's chosen size.
+                            // The system doesn't persist inspector width, so we
+                            // track it ourselves. Only save a *settled* width
+                            // (debounced) while the inspector is actually open —
+                            // otherwise the open/close animation frames (which
+                            // shrink toward 0) would overwrite the saved value.
                             GeometryReader { proxy in
                                 Color.clear.onChange(of: proxy.size.width) { _, width in
-                                    if width > 0 { inspectorWidth = width }
+                                    persistInspectorWidth(width)
                                 }
                             }
                         }
@@ -192,6 +196,19 @@ struct ContentView: View {
             .width(min: 110, ideal: 140)
         }
         .alternatingRowBackgrounds(.enabled)
+    }
+
+    /// Saves the inspector width once it stops changing for a beat, and only if
+    /// the inspector is still open — so transient open/close animation widths
+    /// (which sweep down toward 0) never clobber the user's chosen size.
+    private func persistInspectorWidth(_ width: CGFloat) {
+        guard (300...560).contains(width) else { return }
+        widthCommitTask?.cancel()
+        widthCommitTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled, store.row(selectedID) != nil else { return }
+            inspectorWidth = Double(width)
+        }
     }
 
     private var inspectorShown: Binding<Bool> {
