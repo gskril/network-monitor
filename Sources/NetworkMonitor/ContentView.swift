@@ -46,6 +46,12 @@ struct ContentView: View {
         let visible = store.filteredRows(searchText: searchText)
 
         content(visible)
+            // Footer goes under the main content only, before .inspector, so
+            // it doesn't span across (and clip the bottom of) the inspector
+            // pane, which gets its own full-height scroll.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                statusBar(visibleCount: visible.count)
+            }
             .onExitCommand { if selectedID != nil { selectedID = nil } }
             .inspector(isPresented: inspectorShown) {
                 if let row = store.row(selectedID) {
@@ -67,9 +73,6 @@ struct ContentView: View {
             }
             .searchable(text: $searchText, placement: .toolbar, prompt: "Filter by process, host, port, type")
             .toolbar { toolbarItems }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                statusBar(visibleCount: visible.count)
-            }
             .navigationTitle("Network Monitor")
             .sheet(isPresented: $showingSetup) {
                 SetupView().environmentObject(store)
