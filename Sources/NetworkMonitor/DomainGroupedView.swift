@@ -40,7 +40,7 @@ struct DomainGroupedView: View {
 
     private func processHeader(_ process: ProcessNode) -> some View {
         HStack(spacing: 6) {
-            ProcessIcon(pid: process.pid)
+            ProcessIcon(pid: process.pid, path: process.path)
             Text(process.name).font(.headline)
             Text("·\u{00A0}\(process.connectionCount)")
                 .foregroundStyle(.secondary)
@@ -97,6 +97,7 @@ struct DomainGroupedView: View {
         let id: String
         let pid: Int32
         let name: String
+        let path: String?
         let connectionCount: Int
         let domains: [DomainNode]
     }
@@ -134,6 +135,7 @@ struct DomainGroupedView: View {
                 id: "\(pid)-\(first.processName)",
                 pid: pid,
                 name: first.processName,
+                path: first.processPath,
                 connectionCount: group.reduce(0) { $0 + $1.count },
                 domains: domains
             )

@@ -15,7 +15,7 @@ struct FlowDetailView: View {
         Form {
             Section {
                 HStack(spacing: 10) {
-                    ProcessIcon(pid: row.pid)
+                    ProcessIcon(pid: row.pid, path: row.processPath)
                         .scaleEffect(2)
                         .frame(width: 32, height: 32)
                     VStack(alignment: .leading, spacing: 2) {

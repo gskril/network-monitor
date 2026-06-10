@@ -137,7 +137,7 @@ struct ContentView: View {
 
             TableColumn("Process") { row in
                 HStack(spacing: 6) {
-                    ProcessIcon(pid: row.pid)
+                    ProcessIcon(pid: row.pid, path: row.processPath)
                     Text(row.processName)
                         .lineLimit(1)
                     Text(String(row.pid))
@@ -268,14 +268,25 @@ struct ContentView: View {
     }
 }
 
-/// App icon for GUI processes, a gear for daemons. Cached per pid.
+/// App icon for a process, with a gear fallback for true daemons.
+///
+/// GUI apps resolve directly via NSRunningApplication. Helper/child processes
+/// (e.g. "Google Chrome Helper") aren't registered applications and have no
+/// icon of their own, so we walk their executable path up to the enclosing
+/// top-level `.app` bundle and use *its* icon — so Chrome helpers show the
+/// Chrome icon. Results are cached, including misses, so each process and each
+/// bundle is resolved at most once.
 struct ProcessIcon: View {
     let pid: Int32
+    var path: String?
 
-    private static var cache: [Int32: NSImage] = [:]
+    // `NSImage?` value (not just presence) so misses are cached too — daemons
+    // would otherwise re-hit LaunchServices on every render.
+    private static var byPID: [Int32: NSImage?] = [:]
+    private static var byBundle: [String: NSImage?] = [:]
 
     var body: some View {
-        if let icon = Self.icon(for: pid) {
+        if let icon = Self.icon(pid: pid, path: path) {
             Image(nsImage: icon)
                 .resizable()
                 .frame(width: 16, height: 16)
@@ -287,12 +298,35 @@ struct ProcessIcon: View {
         }
     }
 
-    private static func icon(for pid: Int32) -> NSImage? {
-        if let cached = cache[pid] { return cached }
-        guard let app = NSRunningApplication(processIdentifier: pid), let icon = app.icon else {
-            return nil
+    private static func icon(pid: Int32, path: String?) -> NSImage? {
+        if let cached = byPID[pid] { return cached }
+
+        // A registered GUI app (e.g. Spotify) has its own icon by PID.
+        if let app = NSRunningApplication(processIdentifier: pid), let icon = app.icon {
+            byPID[pid] = icon
+            return icon
         }
-        cache[pid] = icon
+
+        // Otherwise fall back to the enclosing top-level app bundle's icon.
+        let resolved = path.flatMap(topLevelAppBundle(forPath:)).flatMap(bundleIcon(forPath:))
+        byPID[pid] = resolved
+        return resolved
+    }
+
+    /// "/Applications/Google Chrome.app/…/Helper.app/Contents/MacOS/Helper"
+    /// → "/Applications/Google Chrome.app" (the outermost .app, not the helper).
+    private static func topLevelAppBundle(forPath path: String) -> String? {
+        let components = path.components(separatedBy: "/")
+        guard let index = components.firstIndex(where: { $0.hasSuffix(".app") }) else { return nil }
+        return components[0...index].joined(separator: "/")
+    }
+
+    private static func bundleIcon(forPath bundlePath: String) -> NSImage? {
+        if let cached = byBundle[bundlePath] { return cached }
+        let icon = FileManager.default.fileExists(atPath: bundlePath)
+            ? NSWorkspace.shared.icon(forFile: bundlePath)
+            : nil
+        byBundle[bundlePath] = icon
         return icon
     }
 }
