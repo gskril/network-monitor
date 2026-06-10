@@ -15,6 +15,9 @@ struct FlowMiniMap: View {
         }
         .mapStyle(.standard(elevation: .flat))
         .allowsHitTesting(false)
+        // initialPosition only applies on first build; re-create the map when
+        // the selected row's coordinate changes so it re-centers on the pin.
+        .id("\(coordinate.latitude),\(coordinate.longitude)")
     }
 }
 
