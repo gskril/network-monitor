@@ -12,6 +12,7 @@ import SwiftUI
 final class FlowStore: ObservableObject {
     @Published private(set) var rows: [FlowRow] = []
     @Published private(set) var totalSeen = 0
+    @Published private(set) var dnsStatus: DNSSniffer.Status = .inactive
     @Published var isPaused = false {
         didSet { if !isPaused { flush() } }
     }
@@ -34,6 +35,7 @@ final class FlowStore: ObservableObject {
 
     private let pending = PendingEvents()
     private var monitor: FlowMonitor?
+    private var sniffer: DNSSniffer?
     private var flushTimer: Timer?
 
     func start() {
@@ -45,6 +47,17 @@ final class FlowStore: ObservableObject {
         self.monitor = monitor
         monitor.start()
 
+        let sniffer = DNSSniffer(
+            onLearn: { [weak self] mapping in
+                Task { @MainActor [weak self] in self?.applyLearnedHost(ip: mapping.ip, host: mapping.host) }
+            },
+            onStatus: { [weak self] status in
+                Task { @MainActor [weak self] in self?.dnsStatus = status }
+            }
+        )
+        self.sniffer = sniffer
+        sniffer.start()
+
         let timer = Timer(timeInterval: 0.15, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, !self.isPaused else { return }
@@ -53,6 +66,23 @@ final class FlowStore: ObservableObject {
         }
         RunLoop.main.add(timer, forMode: .common)
         flushTimer = timer
+    }
+
+    func shutdown() {
+        sniffer?.stop()
+    }
+
+    /// A DNS response taught us this IP's real hostname; relabel any rows that
+    /// have it (overriding reverse-DNS guesses).
+    private func applyLearnedHost(ip: String, host: String) {
+        var changed = false
+        for (id, var row) in byID where row.remote?.ip == ip && !row.remoteHostAuthoritative {
+            row.remoteHost = host
+            row.remoteHostAuthoritative = true
+            byID[id] = row
+            changed = true
+        }
+        if changed { rows = order.compactMap { byID[$0] } }
     }
 
     var pausedBufferCount: Int { pending.count }
@@ -305,7 +335,14 @@ final class FlowStore: ObservableObject {
     // MARK: - Reverse DNS
 
     private func resolveHostIfNeeded(for row: FlowRow) {
-        guard row.hasRemote, row.remoteHost == nil, let remote = row.remote else { return }
+        guard row.hasRemote, let remote = row.remote else { return }
+
+        // Prefer an authoritative name the DNS sniffer already captured.
+        if !row.remoteHostAuthoritative, let host = DNSCache.shared.host(for: remote.ip) {
+            applyLearnedHost(ip: remote.ip, host: host)
+            return
+        }
+        guard row.remoteHost == nil else { return }
         guard !dnsInFlight.contains(remote.ip) else { return }
         dnsInFlight.insert(remote.ip)
         Task { [weak self] in

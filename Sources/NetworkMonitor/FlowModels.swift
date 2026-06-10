@@ -248,6 +248,7 @@ struct FlowRow: Identifiable {
     var local: Endpoint?
     var remote: Endpoint?
     var remoteHost: String?
+    var remoteHostAuthoritative: Bool = false // from DNS sniffing, not reverse DNS
     var interfaceName: String?
     var rxBytes: UInt64
     var txBytes: UInt64

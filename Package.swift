@@ -5,9 +5,16 @@ let package = Package(
     name: "NetworkMonitor",
     platforms: [.macOS(.v14)],
     targets: [
+        .target(name: "CDNSSniff"),
         .executableTarget(
             name: "NetworkMonitor",
-            path: "Sources/NetworkMonitor"
+            dependencies: ["CDNSSniff"],
+            path: "Sources/NetworkMonitor",
+            linkerSettings: [.linkedLibrary("pcap")]
+        ),
+        .testTarget(
+            name: "NetworkMonitorTests",
+            dependencies: ["NetworkMonitor"]
         )
     ]
 )

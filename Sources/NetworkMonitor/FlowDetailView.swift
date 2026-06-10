@@ -49,7 +49,7 @@ struct FlowDetailView: View {
 
             Section("Remote") {
                 if let host = row.remoteHost {
-                    verticalRow("Hostname", host)
+                    verticalRow(row.remoteHostAuthoritative ? "Hostname (from DNS)" : "Hostname (reverse DNS)", host)
                 }
                 if let remote = row.remote, !remote.isUnspecified {
                     verticalRow("Address", remote.ip)

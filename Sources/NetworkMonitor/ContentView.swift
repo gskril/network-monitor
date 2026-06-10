@@ -179,6 +179,7 @@ struct ContentView: View {
                 Label("Live", systemImage: "circle.fill")
                     .foregroundStyle(.green)
             }
+            dnsStatusLabel
             Spacer()
             Text("\(visibleCount) shown · \(store.rows.count) flows · \(store.totalSeen) seen")
                 .foregroundStyle(.secondary)
@@ -187,6 +188,26 @@ struct ContentView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(.bar)
+    }
+
+    @ViewBuilder
+    private var dnsStatusLabel: some View {
+        switch store.dnsStatus {
+        case .active(let interface):
+            Label("DNS names on (\(interface))", systemImage: "checkmark.seal.fill")
+                .foregroundStyle(.green)
+                .help("Capturing DNS responses — flows show the real hostnames apps requested.")
+        case .denied:
+            Label("DNS names off", systemImage: "lock.fill")
+                .foregroundStyle(.secondary)
+                .help("True hostnames need BPF access. Run scripts/install-bpf-helper.sh once, then relaunch. Until then, hostnames come from reverse DNS.")
+        case .unavailable(let reason):
+            Label("DNS names off", systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.secondary)
+                .help("DNS capture unavailable: \(reason). Falling back to reverse DNS.")
+        case .inactive:
+            EmptyView()
+        }
     }
 }
 
