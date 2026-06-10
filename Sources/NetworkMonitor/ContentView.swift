@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject private var store: FlowStore
     @State private var searchText = ""
     @State private var selectedID: FlowRow.ID?
+    @AppStorage("inspectorWidth") private var inspectorWidth = 360.0
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -100,7 +101,16 @@ struct ContentView: View {
         .inspector(isPresented: inspectorShown) {
             if let row = store.rows.first(where: { $0.id == selectedID }) {
                 FlowDetailView(row: row)
-                    .inspectorColumnWidth(min: 280, ideal: 330, max: 420)
+                    .inspectorColumnWidth(min: 300, ideal: CGFloat(inspectorWidth), max: 560)
+                    .background {
+                        // The system doesn't persist inspector width; track it
+                        // so reopening restores the user's chosen size.
+                        GeometryReader { proxy in
+                            Color.clear.onChange(of: proxy.size.width) { _, width in
+                                if width > 0 { inspectorWidth = width }
+                            }
+                        }
+                    }
             }
         }
         .searchable(text: $searchText, placement: .toolbar, prompt: "Filter by process, host, port, type")

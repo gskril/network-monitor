@@ -26,10 +26,7 @@ struct FlowDetailView: View {
                     }
                 }
                 if let path = row.processPath {
-                    Text(path)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
+                    verticalRow("Path", path, font: .caption.monospaced())
                 }
             }
 
@@ -52,17 +49,17 @@ struct FlowDetailView: View {
 
             Section("Remote") {
                 if let host = row.remoteHost {
-                    monospacedRow("Hostname", host)
+                    verticalRow("Hostname", host)
                 }
                 if let remote = row.remote, !remote.isUnspecified {
-                    monospacedRow("Address", remote.ip)
-                    monospacedRow("Port", String(remote.port))
+                    verticalRow("Address", remote.ip)
+                    LabeledContent("Port", value: String(remote.port))
                 } else {
                     Text("No remote endpoint (unconnected socket)")
                         .foregroundStyle(.secondary)
                 }
                 if let local = row.local {
-                    monospacedRow("Local", "\(local.ip):\(local.port)")
+                    verticalRow("Local", "\(local.ip):\(local.port)")
                 }
             }
 
@@ -160,13 +157,19 @@ struct FlowDetailView: View {
         String(format: "%.1f ms", seconds * 1000)
     }
 
+    /// Label-above-value layout for values too long to share a line with
+    /// their label (hostnames, paths, addresses).
     @ViewBuilder
-    private func monospacedRow(_ label: String, _ value: String) -> some View {
-        LabeledContent(label) {
+    private func verticalRow(_ label: String, _ value: String, font: Font = .body.monospaced()) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Text(value)
-                .font(.body.monospaced())
+                .font(font)
                 .textSelection(.enabled)
-                .multilineTextAlignment(.trailing)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(.vertical, 1)
     }
 }
