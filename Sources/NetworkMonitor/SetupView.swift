@@ -147,8 +147,17 @@ struct SetupView: View {
                     Text("Downloading… \(Int(downloadProgress * 100))%").font(.caption)
                 }
             } else {
-                Button(geoInstalled ? "Update database" : "Download location data") { downloadGeo() }
-                    .buttonStyle(.borderedProminent)
+                HStack(spacing: 10) {
+                    Button(geoInstalled ? "Update database" : "Download location data") { downloadGeo() }
+                        .buttonStyle(.borderedProminent)
+                    if geoInstalled {
+                        Button("Show in Finder") {
+                            NSWorkspace.shared.activateFileViewerSelecting([
+                                URL(fileURLWithPath: GeoDataInstaller.dbPath)
+                            ])
+                        }
+                    }
+                }
             }
 
             if let geoError {
