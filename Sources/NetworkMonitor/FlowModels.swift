@@ -249,6 +249,7 @@ struct FlowRow: Identifiable {
     var remote: Endpoint?
     var remoteHost: String?
     var remoteHostAuthoritative: Bool = false // from DNS sniffing, not reverse DNS
+    var location: GeoIP.Location?
     var interfaceName: String?
     var rxBytes: UInt64
     var txBytes: UInt64
@@ -267,6 +268,20 @@ struct FlowRow: Identifiable {
     var remoteDisplay: String {
         guard let remote, !remote.isUnspecified else { return "—" }
         return remoteHost ?? remote.ip
+    }
+
+    /// Registered domain for grouping; falls back to the IP when no hostname
+    /// is known yet.
+    var domainGroup: String {
+        if let host = remoteHost, let domain = RegisteredDomain.of(host) { return domain }
+        return remote?.ip ?? "—"
+    }
+
+    /// "City, Country" (or just country) for the estimated-region display.
+    var regionDisplay: String? {
+        guard let location else { return nil }
+        if let city = location.city, let country = location.country { return "\(city), \(country)" }
+        return location.city ?? location.country ?? location.countryCode
     }
 
     var stateDisplay: String {
@@ -289,6 +304,31 @@ enum MachTime {
         guard machTime > 0, machTime <= now else { return Date() }
         let elapsedNs = Double(now - machTime) * Double(timebase.numer) / Double(timebase.denom)
         return Date(timeIntervalSinceNow: -elapsedNs / 1_000_000_000)
+    }
+}
+
+/// The registered ("eTLD+1") domain for grouping, e.g. api.github.com →
+/// github.com, foo.co.uk → foo.co.uk. Uses a curated list of common
+/// multi-label public suffixes plus a last-two-labels fallback — not the full
+/// Public Suffix List, but correct for the domains that actually show up.
+enum RegisteredDomain {
+    private static let multiLabelSuffixes: Set<String> = [
+        "co.uk", "org.uk", "gov.uk", "ac.uk", "co.jp", "co.kr", "co.nz", "co.za",
+        "com.au", "net.au", "org.au", "com.br", "com.cn", "com.mx", "com.tr",
+        "com.tw", "com.hk", "com.sg", "co.in", "co.il", "com.ar", "com.sa",
+    ]
+
+    static func of(_ host: String) -> String? {
+        // Don't treat bare IPs as domains.
+        if host.contains(":") { return nil }
+        let labels = host.split(separator: ".").map(String.init)
+        guard labels.count >= 2 else { return nil }
+        if labels.allSatisfy({ Int($0) != nil }) { return nil } // IPv4
+        let lastTwo = labels.suffix(2).joined(separator: ".")
+        if multiLabelSuffixes.contains(lastTwo), labels.count >= 3 {
+            return labels.suffix(3).joined(separator: ".")
+        }
+        return lastTwo
     }
 }
 

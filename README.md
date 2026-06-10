@@ -13,8 +13,28 @@ Because it's a **passive observer** (it reads kernel statistics rather than sitt
 - `Sources/NetworkMonitor/FlowStore.swift` — main-actor model; coalesces event bursts before hitting SwiftUI
 - `Sources/NetworkMonitor/DNSSniffer.swift` / `DNSParser.swift` — optional libpcap DNS-response capture, parsed into IP→hostname mappings
 - `Sources/CDNSSniff/` — minimal C shim over libpcap
-- `Sources/NetworkMonitor/ContentView.swift` — the table UI (search, pause, filters)
+- `Sources/NetworkMonitor/GeoIP.swift` — pure-Swift MaxMind/DB-IP `.mmdb` reader for offline IP geolocation
+- `Sources/NetworkMonitor/ContentView.swift` — the UI: List / Domains / Map modes, search, pause, filters
+- `Sources/NetworkMonitor/DomainGroupedView.swift` / `MapViews.swift` — the grouped and map views
 - `probe/probe.swift` — standalone CLI used to verify the private API's behavior on this macOS version
+
+## Views
+
+A segmented control in the toolbar switches between three modes:
+
+- **List** — the live flat feed, newest first.
+- **Domains** — a process → registered-domain → endpoint outline (most useful for browsers, which otherwise dominate the flat list). Like Little Snitch, granularity is process + domain; neither tool can see which browser tab made a request.
+- **Map** — every located server plotted on a world map, clustered by region and sized by connection count. Each flow's estimated city/country and a map pin also appear in the inspector.
+
+## Estimated locations (optional)
+
+The map and per-flow region need an offline IP→location database. Fetch the free DB-IP "IP to City Lite" data (CC-BY, no signup) — nothing about your connections ever leaves your Mac:
+
+```sh
+scripts/fetch-geoip.sh   # downloads ~120MB to ~/Library/Application Support/NetworkMonitor/
+```
+
+Without it the app runs fine; the Map view shows "no located connections" and the inspector omits the region section. Locations are city-level estimates from IP allocation — approximate, not exact.
 
 ## True hostnames (optional)
 
@@ -48,7 +68,9 @@ This app was built as a personal tool. [Little Snitch Mini](https://www.obdev.at
 | **Blocking traffic** | ❌ observation only | ✅ (with subscription, via blocklists) |
 | Hostnames | Reverse DNS by default; true requested hostname with the optional BPF helper (watches DNS responses) | True domain from DNS/TLS handshake inspection |
 | History | In-memory, capped at 5,000 flows, gone on quit | Persistent history (up to a year) |
-| Traffic totals/charts | Per-flow bytes only | Rich charts, map view |
+| Domain grouping | ✅ process → domain → endpoint outline | ✅ |
+| Map of server locations | ✅ offline, city-level estimate | ✅ city-level |
+| Traffic totals/charts | Per-flow + per-domain bytes | Rich charts, map view |
 | Install friction | None — no extension, no approval | System extension + filter approval |
 | Privacy/trust | 100% your code, fully local | Closed source (reputable vendor) |
 | Future-proofing | Private API, could break in a macOS update | Public, supported API |

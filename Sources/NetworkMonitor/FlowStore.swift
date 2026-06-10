@@ -33,6 +33,17 @@ final class FlowStore: ObservableObject {
     private var dnsInFlight: Set<String> = []
     private let launchDate = Date()
 
+    let geoip: GeoIP? = {
+        let dir = NSString(string: "~/Library/Application Support/NetworkMonitor").expandingTildeInPath
+        return GeoIP(path: dir + "/GeoLite-City.mmdb")
+    }()
+    var geoAvailable: Bool { geoip != nil }
+
+    private func geoLocation(for endpoint: Endpoint) -> GeoIP.Location? {
+        guard !endpoint.isUnspecified, !endpoint.isLoopback else { return nil }
+        return geoip?.lookup(endpoint.ip)
+    }
+
     private let pending = PendingEvents()
     private var monitor: FlowMonitor?
     private var sniffer: DNSSniffer?
@@ -182,6 +193,7 @@ final class FlowStore: ObservableObject {
             local: description.local,
             remote: description.remote,
             remoteHost: nil,
+            location: description.remote.flatMap(geoLocation(for:)),
             interfaceName: description.interfaceIndex.flatMap(interfaceName(forIndex:)),
             rxBytes: 0,
             txBytes: 0,
@@ -202,6 +214,7 @@ final class FlowStore: ObservableObject {
 
         let hadRemote = row.hasRemote
         if let remote = description.remote { row.remote = remote }
+        if row.location == nil, let remote = row.remote { row.location = geoLocation(for: remote) }
         if let state = description.tcpState { row.tcpState = state }
         if let index = description.interfaceIndex, row.interfaceName == nil {
             row.interfaceName = interfaceName(forIndex: index)

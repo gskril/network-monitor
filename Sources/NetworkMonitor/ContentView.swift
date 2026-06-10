@@ -1,11 +1,32 @@
 import AppKit
 import SwiftUI
 
+enum ViewMode: String, CaseIterable {
+    case list, domains, map
+
+    var label: String {
+        switch self {
+        case .list: "List"
+        case .domains: "Domains"
+        case .map: "Map"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .list: "list.bullet"
+        case .domains: "rectangle.3.group"
+        case .map: "map"
+        }
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject private var store: FlowStore
     @State private var searchText = ""
     @State private var selectedID: FlowRow.ID?
     @AppStorage("inspectorWidth") private var inspectorWidth = 360.0
+    @AppStorage("viewMode") private var viewMode = ViewMode.list
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -22,6 +43,75 @@ struct ContentView: View {
     var body: some View {
         let visible = store.filteredRows(searchText: searchText)
 
+        content(visible)
+            .onExitCommand { if selectedID != nil { selectedID = nil } }
+            .inspector(isPresented: inspectorShown) {
+                if let row = store.rows.first(where: { $0.id == selectedID }) {
+                    FlowDetailView(row: row)
+                        .inspectorColumnWidth(min: 300, ideal: CGFloat(inspectorWidth), max: 560)
+                        .background {
+                            // The system doesn't persist inspector width; track
+                            // it so reopening restores the user's chosen size.
+                            GeometryReader { proxy in
+                                Color.clear.onChange(of: proxy.size.width) { _, width in
+                                    if width > 0 { inspectorWidth = width }
+                                }
+                            }
+                        }
+                }
+            }
+            .searchable(text: $searchText, placement: .toolbar, prompt: "Filter by process, host, port, type")
+            .toolbar { toolbarItems }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                statusBar(visibleCount: visible.count)
+            }
+            .navigationTitle("Network Monitor")
+    }
+
+    @ViewBuilder
+    private func content(_ visible: [FlowRow]) -> some View {
+        switch viewMode {
+        case .list: flowTable(visible)
+        case .domains: DomainGroupedView(rows: visible, selectedID: $selectedID)
+        case .map: FlowsMapView(rows: visible)
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarItems: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            Picker("View", selection: $viewMode) {
+                ForEach(ViewMode.allCases, id: \.self) { mode in
+                    Label(mode.label, systemImage: mode.symbol).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .help("Switch between list, domain-grouped, and map views")
+        }
+        ToolbarItemGroup {
+            Button { store.togglePause() } label: {
+                Label(store.isPaused ? "Resume" : "Pause",
+                      systemImage: store.isPaused ? "play.fill" : "pause.fill")
+            }
+            .help(store.isPaused ? "Resume live capture (⌘.)" : "Pause the feed (⌘.)")
+
+            Button { store.clear() } label: {
+                Label("Clear", systemImage: "trash")
+            }
+            .help("Clear all rows (⌘K)")
+
+            Menu {
+                Toggle("Show loopback traffic", isOn: $store.showLoopback)
+                Toggle("Show listeners & unconnected sockets", isOn: $store.showUnconnected)
+                Toggle("Show flows from before launch", isOn: $store.showPreexisting)
+            } label: {
+                Label("Filters", systemImage: "line.3.horizontal.decrease.circle")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func flowTable(_ visible: [FlowRow]) -> some View {
         Table(visible, selection: $selectedID) {
             TableColumn("Time") { row in
                 HStack(spacing: 5) {
@@ -98,52 +188,6 @@ struct ContentView: View {
             .width(min: 110, ideal: 140)
         }
         .alternatingRowBackgrounds(.enabled)
-        .inspector(isPresented: inspectorShown) {
-            if let row = store.rows.first(where: { $0.id == selectedID }) {
-                FlowDetailView(row: row)
-                    .inspectorColumnWidth(min: 300, ideal: CGFloat(inspectorWidth), max: 560)
-                    .background {
-                        // The system doesn't persist inspector width; track it
-                        // so reopening restores the user's chosen size.
-                        GeometryReader { proxy in
-                            Color.clear.onChange(of: proxy.size.width) { _, width in
-                                if width > 0 { inspectorWidth = width }
-                            }
-                        }
-                    }
-            }
-        }
-        .searchable(text: $searchText, placement: .toolbar, prompt: "Filter by process, host, port, type")
-        .toolbar {
-            ToolbarItemGroup {
-                Button {
-                    store.togglePause()
-                } label: {
-                    Label(store.isPaused ? "Resume" : "Pause",
-                          systemImage: store.isPaused ? "play.fill" : "pause.fill")
-                }
-                .help(store.isPaused ? "Resume live capture (⌘.)" : "Pause the feed (⌘.)")
-
-                Button {
-                    store.clear()
-                } label: {
-                    Label("Clear", systemImage: "trash")
-                }
-                .help("Clear all rows (⌘K)")
-
-                Menu {
-                    Toggle("Show loopback traffic", isOn: $store.showLoopback)
-                    Toggle("Show listeners & unconnected sockets", isOn: $store.showUnconnected)
-                    Toggle("Show flows from before launch", isOn: $store.showPreexisting)
-                } label: {
-                    Label("Filters", systemImage: "line.3.horizontal.decrease.circle")
-                }
-            }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            statusBar(visibleCount: visible.count)
-        }
-        .navigationTitle("Network Monitor")
     }
 
     private var inspectorShown: Binding<Bool> {

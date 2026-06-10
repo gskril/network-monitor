@@ -1,3 +1,4 @@
+import MapKit
 import SwiftUI
 
 /// Inspector panel showing everything the kernel exposes about a flow.
@@ -105,6 +106,25 @@ struct FlowDetailView: View {
                 }
             }
 
+            if let location = row.location {
+                Section("Estimated region") {
+                    LabeledContent("Location") {
+                        Text("\(Self.flag(location.countryCode)) \(row.regionDisplay ?? "Unknown")")
+                            .multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("Coordinates",
+                                   value: String(format: "%.3f, %.3f", location.latitude, location.longitude))
+                    FlowMiniMap(coordinate: CLLocationCoordinate2D(
+                        latitude: location.latitude, longitude: location.longitude))
+                        .frame(height: 150)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .listRowInsets(EdgeInsets())
+                    Text("Approximate server location from an offline IP database — city-level and not exact.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
             if showsPayloadNote {
                 Section {
                     Label {
@@ -155,6 +175,18 @@ struct FlowDetailView: View {
 
     private func rttText(_ seconds: Double) -> String {
         String(format: "%.1f ms", seconds * 1000)
+    }
+
+    /// Regional-indicator flag emoji from an ISO 3166-1 alpha-2 code.
+    static func flag(_ code: String?) -> String {
+        guard let code, code.count == 2 else { return "🏳️" }
+        let base: UInt32 = 127397 // 0x1F1E6 - 'A'
+        var scalars = String.UnicodeScalarView()
+        for unicode in code.uppercased().unicodeScalars {
+            guard let scalar = UnicodeScalar(base + unicode.value) else { return "🏳️" }
+            scalars.append(scalar)
+        }
+        return String(scalars)
     }
 
     /// Label-above-value layout for values too long to share a line with
