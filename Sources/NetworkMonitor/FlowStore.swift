@@ -26,8 +26,9 @@ final class FlowStore: ObservableObject {
     private var byID: [UInt64: FlowRow] = [:]          // row id → row
     private var order: [UInt64] = []                   // row ids, newest activity first
     private var sourceToRow: [UInt64: UInt64] = [:]    // kernel source id → row id
-    private var sourceTraffic: [UInt64: (rx: UInt64, tx: UInt64)] = [:]
+    private var sourceTraffic: [UInt64: TrafficCounters] = [:]
     private var keyToRow: [FlowKey: UInt64] = [:]      // coalescing target per identity
+    private var pathByPID: [Int32: String?] = [:]
     private var dnsInFlight: Set<String> = []
     private let launchDate = Date()
 
@@ -143,6 +144,7 @@ final class FlowStore: ObservableObject {
             members: [sourceID],
             key: key,
             preexisting: preexisting,
+            processPath: description.pid.flatMap(cachedProcessPath(forPID:)),
             processName: description.processName ?? "unknown",
             pid: description.pid ?? 0,
             provider: description.provider ?? "?",
@@ -189,6 +191,7 @@ final class FlowStore: ObservableObject {
                 target.isClosed = false
                 target.rxBytes += row.rxBytes
                 target.txBytes += row.txBytes
+                target.stats.absorbCounters(of: row.stats)
                 if let state = row.tcpState { target.tcpState = state }
                 byID[targetID] = target
                 for member in row.members { sourceToRow[member] = targetID }
@@ -218,18 +221,29 @@ final class FlowStore: ObservableObject {
         byID[rowID] = row
     }
 
-    /// Byte counts arrive as per-source cumulative totals; rows accumulate
-    /// deltas so coalesced rows show the group's combined traffic.
+    /// Traffic counters arrive as per-source cumulative totals; rows
+    /// accumulate deltas so coalesced rows show the group's combined traffic.
     private func addTrafficDelta(rowID: UInt64, sourceID: UInt64, description: FlowDescription) {
-        guard description.rxBytes != nil || description.txBytes != nil else { return }
-        let rx = description.rxBytes ?? 0
-        let tx = description.txBytes ?? 0
-        let last = sourceTraffic[sourceID] ?? (0, 0)
-        sourceTraffic[sourceID] = (rx, tx)
+        let current = TrafficCounters(description: description)
+        let last = sourceTraffic[sourceID] ?? TrafficCounters()
+        sourceTraffic[sourceID] = current
         guard var row = byID[rowID] else { return }
-        if rx > last.rx { row.rxBytes += rx - last.rx }
-        if tx > last.tx { row.txBytes += tx - last.tx }
+        row.rxBytes += current.rxBytes.subtractingOrZero(last.rxBytes)
+        row.txBytes += current.txBytes.subtractingOrZero(last.txBytes)
+        row.stats.rxPackets += current.rxPackets.subtractingOrZero(last.rxPackets)
+        row.stats.txPackets += current.txPackets.subtractingOrZero(last.txPackets)
+        row.stats.retransmittedBytes += current.retransmitted.subtractingOrZero(last.retransmitted)
+        row.stats.rxDuplicateBytes += current.duplicate.subtractingOrZero(last.duplicate)
+        row.stats.rxOutOfOrderBytes += current.outOfOrder.subtractingOrZero(last.outOfOrder)
+        row.stats.updateQuality(from: description)
         byID[rowID] = row
+    }
+
+    private func cachedProcessPath(forPID pid: Int32) -> String? {
+        if let cached = pathByPID[pid] { return cached }
+        let path = processPath(forPID: pid)
+        pathByPID[pid] = path
+        return path
     }
 
     private func makeKey(description: FlowDescription, fallback: FlowRow? = nil) -> FlowKey? {
@@ -311,6 +325,35 @@ final class FlowStore: ObservableObject {
                 }
             }
         }
+    }
+}
+
+/// Cumulative per-source counters used to compute per-update deltas.
+private struct TrafficCounters {
+    var rxBytes: UInt64 = 0
+    var txBytes: UInt64 = 0
+    var rxPackets: UInt64 = 0
+    var txPackets: UInt64 = 0
+    var retransmitted: UInt64 = 0
+    var duplicate: UInt64 = 0
+    var outOfOrder: UInt64 = 0
+
+    init() {}
+
+    init(description: FlowDescription) {
+        rxBytes = description.rxBytes ?? 0
+        txBytes = description.txBytes ?? 0
+        rxPackets = description.rxPackets ?? 0
+        txPackets = description.txPackets ?? 0
+        retransmitted = description.retransmittedBytes ?? 0
+        duplicate = description.rxDuplicateBytes ?? 0
+        outOfOrder = description.rxOutOfOrderBytes ?? 0
+    }
+}
+
+private extension UInt64 {
+    func subtractingOrZero(_ other: UInt64) -> UInt64 {
+        self > other ? self - other : 0
     }
 }
 

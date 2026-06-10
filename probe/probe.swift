@@ -91,5 +91,13 @@ let udpResult = NStatManagerAddAllUDP(manager)
 print("AddAllTCP=\(tcpResult) AddAllUDP=\(udpResult)")
 
 // Run briefly; new flows created while running should appear as new sources.
-RunLoop.main.run(until: Date(timeIntervalSinceNow: 6))
+// Re-query all descriptions a few times so fields that populate with traffic
+// (remote address, rtt, byte counts) show real values.
+typealias QueryAllFn = @convention(c) (UnsafeMutableRawPointer?, @escaping RemovedCallback) -> Void
+let NStatManagerQueryAllSourcesDescriptions = unsafeBitCast(sym("NStatManagerQueryAllSourcesDescriptions"), to: QueryAllFn.self)
+for _ in 0..<3 {
+    RunLoop.main.run(until: Date(timeIntervalSinceNow: 2))
+    NStatManagerQueryAllSourcesDescriptions(manager) {}
+}
+RunLoop.main.run(until: Date(timeIntervalSinceNow: 1))
 print("done, total sources seen: \(sourceCount)")

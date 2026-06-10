@@ -4,6 +4,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var store: FlowStore
     @State private var searchText = ""
+    @State private var selectedID: FlowRow.ID?
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -20,7 +21,7 @@ struct ContentView: View {
     var body: some View {
         let visible = store.filteredRows(searchText: searchText)
 
-        Table(visible) {
+        Table(visible, selection: $selectedID) {
             TableColumn("Time") { row in
                 HStack(spacing: 5) {
                     Text(Self.timeFormatter.string(from: row.lastSeenAt))
@@ -96,6 +97,12 @@ struct ContentView: View {
             .width(min: 110, ideal: 140)
         }
         .alternatingRowBackgrounds(.enabled)
+        .inspector(isPresented: inspectorShown) {
+            if let row = store.rows.first(where: { $0.id == selectedID }) {
+                FlowDetailView(row: row)
+                    .inspectorColumnWidth(min: 280, ideal: 330, max: 420)
+            }
+        }
         .searchable(text: $searchText, placement: .toolbar, prompt: "Filter by process, host, port, type")
         .toolbar {
             ToolbarItemGroup {
@@ -127,6 +134,13 @@ struct ContentView: View {
             statusBar(visibleCount: visible.count)
         }
         .navigationTitle("Network Monitor")
+    }
+
+    private var inspectorShown: Binding<Bool> {
+        Binding(
+            get: { selectedID != nil && store.rows.contains { $0.id == selectedID } },
+            set: { shown in if !shown { selectedID = nil } }
+        )
     }
 
     private func timeHelp(for row: FlowRow) -> String {

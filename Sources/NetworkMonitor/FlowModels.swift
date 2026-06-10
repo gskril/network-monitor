@@ -52,6 +52,18 @@ struct FlowDescription {
     var txBytes: UInt64?
     var startMachTime: UInt64?
 
+    var rxPackets: UInt64?
+    var txPackets: UInt64?
+    var retransmittedBytes: UInt64?
+    var rxDuplicateBytes: UInt64?
+    var rxOutOfOrderBytes: UInt64?
+    var rttAverage: Double?
+    var rttMinimum: Double?
+    var rttVariation: Double?
+    var congestionAlgorithm: String?
+    var interfaceKind: String?
+    var isExpensiveInterface: Bool = false
+
     init(dictionary: [String: Any]) {
         processName = dictionary["processName"] as? String
         pid = (dictionary["processID"] as? NSNumber)?.int32Value
@@ -67,6 +79,32 @@ struct FlowDescription {
         rxBytes = (dictionary["rxBytes"] as? NSNumber)?.uint64Value
         txBytes = (dictionary["txBytes"] as? NSNumber)?.uint64Value
         startMachTime = (dictionary["startAbsoluteTime"] as? NSNumber)?.uint64Value
+
+        rxPackets = (dictionary["rxPackets"] as? NSNumber)?.uint64Value
+        txPackets = (dictionary["txPackets"] as? NSNumber)?.uint64Value
+        retransmittedBytes = (dictionary["txRetransmittedBytes"] as? NSNumber)?.uint64Value
+        rxDuplicateBytes = (dictionary["rxDuplicateBytes"] as? NSNumber)?.uint64Value
+        rxOutOfOrderBytes = (dictionary["rxOutOfOrderBytes"] as? NSNumber)?.uint64Value
+
+        // RTT values are reported as floating-point seconds; 0 means unmeasured.
+        func seconds(_ key: String) -> Double? {
+            guard let value = (dictionary[key] as? NSNumber)?.doubleValue, value > 0 else { return nil }
+            return value
+        }
+        rttAverage = seconds("rttAverage")
+        rttMinimum = seconds("rttMinimum")
+        rttVariation = seconds("rttVariation")
+        congestionAlgorithm = dictionary["congestionAlgorithm"] as? String
+
+        func flag(_ key: String) -> Bool {
+            (dictionary[key] as? NSNumber)?.boolValue ?? false
+        }
+        if flag("ifWiFi") { interfaceKind = "Wi-Fi" }
+        else if flag("ifWired") || flag("ifEthernet") { interfaceKind = "Wired" }
+        else if flag("ifCellular") { interfaceKind = "Cellular" }
+        else if flag("ifLoopback") { interfaceKind = "Loopback" }
+        else if flag("ifAWDL") { interfaceKind = "AWDL" }
+        isExpensiveInterface = flag("ifExpensive")
     }
 }
 
@@ -151,6 +189,45 @@ struct FlowKey: Hashable {
     var provider: String
 }
 
+/// Connection-quality details shown in the inspector. Counters accumulate
+/// across coalesced flows; quality readings reflect the latest report.
+struct FlowStats {
+    var rxPackets: UInt64 = 0
+    var txPackets: UInt64 = 0
+    var retransmittedBytes: UInt64 = 0
+    var rxDuplicateBytes: UInt64 = 0
+    var rxOutOfOrderBytes: UInt64 = 0
+    var rttAverage: Double?
+    var rttMinimum: Double?
+    var rttVariation: Double?
+    var congestionAlgorithm: String?
+    var interfaceKind: String?
+    var isExpensiveInterface = false
+
+    mutating func updateQuality(from description: FlowDescription) {
+        if let rtt = description.rttAverage { rttAverage = rtt }
+        if let rtt = description.rttMinimum { rttMinimum = rtt }
+        if let rtt = description.rttVariation { rttVariation = rtt }
+        if let algorithm = description.congestionAlgorithm { congestionAlgorithm = algorithm }
+        if let kind = description.interfaceKind { interfaceKind = kind }
+        if description.isExpensiveInterface { isExpensiveInterface = true }
+    }
+
+    mutating func absorbCounters(of other: FlowStats) {
+        rxPackets += other.rxPackets
+        txPackets += other.txPackets
+        retransmittedBytes += other.retransmittedBytes
+        rxDuplicateBytes += other.rxDuplicateBytes
+        rxOutOfOrderBytes += other.rxOutOfOrderBytes
+        if rttAverage == nil { rttAverage = other.rttAverage }
+        if rttMinimum == nil { rttMinimum = other.rttMinimum }
+        if rttVariation == nil { rttVariation = other.rttVariation }
+        if congestionAlgorithm == nil { congestionAlgorithm = other.congestionAlgorithm }
+        if interfaceKind == nil { interfaceKind = other.interfaceKind }
+        isExpensiveInterface = isExpensiveInterface || other.isExpensiveInterface
+    }
+}
+
 /// A row in the UI: one flow (or a group of coalesced identical flows),
 /// updated in place as its state evolves.
 struct FlowRow: Identifiable {
@@ -162,6 +239,8 @@ struct FlowRow: Identifiable {
     var members: [UInt64]
     var key: FlowKey?
     var preexisting: Bool
+    var processPath: String?
+    var stats = FlowStats()
     var processName: String
     var pid: Int32
     var provider: String
@@ -210,6 +289,13 @@ enum MachTime {
         let elapsedNs = Double(now - machTime) * Double(timebase.numer) / Double(timebase.denom)
         return Date(timeIntervalSinceNow: -elapsedNs / 1_000_000_000)
     }
+}
+
+func processPath(forPID pid: Int32) -> String? {
+    guard pid > 0 else { return nil }
+    var buffer = [CChar](repeating: 0, count: 4096)
+    guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+    return String(cString: buffer)
 }
 
 func interfaceName(forIndex index: UInt32) -> String? {
