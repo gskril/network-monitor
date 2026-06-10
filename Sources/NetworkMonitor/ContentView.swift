@@ -47,7 +47,7 @@ struct ContentView: View {
         content(visible)
             .onExitCommand { if selectedID != nil { selectedID = nil } }
             .inspector(isPresented: inspectorShown) {
-                if let row = store.rows.first(where: { $0.id == selectedID }) {
+                if let row = store.row(selectedID) {
                     FlowDetailView(row: row)
                         .inspectorColumnWidth(min: 300, ideal: CGFloat(inspectorWidth), max: 560)
                         .background {
@@ -196,7 +196,7 @@ struct ContentView: View {
 
     private var inspectorShown: Binding<Bool> {
         Binding(
-            get: { selectedID != nil && store.rows.contains { $0.id == selectedID } },
+            get: { store.row(selectedID) != nil },
             set: { shown in if !shown { selectedID = nil } }
         )
     }

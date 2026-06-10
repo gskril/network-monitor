@@ -2,22 +2,31 @@ import MapKit
 import SwiftUI
 
 /// Small static map centered on one server location, shown in the inspector.
+/// Reuses a single map view across selections and just moves the camera —
+/// recreating the MKMapView per click (e.g. via `.id`) is expensive enough to
+/// make row selection feel laggy.
 struct FlowMiniMap: View {
     let coordinate: CLLocationCoordinate2D
+    @State private var position: MapCameraPosition
+
+    init(coordinate: CLLocationCoordinate2D) {
+        self.coordinate = coordinate
+        _position = State(initialValue: .region(Self.region(for: coordinate)))
+    }
 
     var body: some View {
-        Map(initialPosition: .region(MKCoordinateRegion(
-            center: coordinate,
-            span: MKCoordinateSpan(latitudeDelta: 12, longitudeDelta: 12)
-        ))) {
+        Map(position: $position, interactionModes: []) {
             Marker("", coordinate: coordinate)
                 .tint(.red)
         }
         .mapStyle(.standard(elevation: .flat))
-        .allowsHitTesting(false)
-        // initialPosition only applies on first build; re-create the map when
-        // the selected row's coordinate changes so it re-centers on the pin.
-        .id("\(coordinate.latitude),\(coordinate.longitude)")
+        .onChange(of: "\(coordinate.latitude),\(coordinate.longitude)") {
+            position = .region(Self.region(for: coordinate))
+        }
+    }
+
+    private static func region(for coordinate: CLLocationCoordinate2D) -> MKCoordinateRegion {
+        MKCoordinateRegion(center: coordinate, span: MKCoordinateSpan(latitudeDelta: 12, longitudeDelta: 12))
     }
 }
 

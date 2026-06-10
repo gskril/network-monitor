@@ -111,6 +111,13 @@ final class FlowStore: ObservableObject {
 
     var pausedBufferCount: Int { pending.count }
 
+    /// O(1) lookup for the inspector, avoiding a linear scan of `rows` on every
+    /// refresh tick.
+    func row(_ id: FlowRow.ID?) -> FlowRow? {
+        guard let id else { return nil }
+        return byID[id]
+    }
+
     func togglePause() {
         isPaused.toggle()
     }
