@@ -33,15 +33,28 @@ final class FlowStore: ObservableObject {
     private var dnsInFlight: Set<String> = []
     private let launchDate = Date()
 
-    let geoip: GeoIP? = {
-        let dir = NSString(string: "~/Library/Application Support/NetworkMonitor").expandingTildeInPath
-        return GeoIP(path: dir + "/GeoLite-City.mmdb")
-    }()
+    @Published private(set) var geoip: GeoIP? = GeoIP(path: GeoDataInstaller.dbPath)
     var geoAvailable: Bool { geoip != nil }
 
     private func geoLocation(for endpoint: Endpoint) -> GeoIP.Location? {
         guard !endpoint.isUnspecified, !endpoint.isLoopback else { return nil }
         return geoip?.lookup(endpoint.ip)
+    }
+
+    /// Re-open the location database (after a download) and back-fill any rows
+    /// that don't have a location yet, so the map populates without a relaunch.
+    func reloadGeoIP() {
+        geoip = GeoIP(path: GeoDataInstaller.dbPath)
+        guard geoip != nil else { return }
+        var changed = false
+        for (id, var row) in byID where row.location == nil {
+            if let remote = row.remote, let location = geoLocation(for: remote) {
+                row.location = location
+                byID[id] = row
+                changed = true
+            }
+        }
+        if changed { rows = order.compactMap { byID[$0] } }
     }
 
     private let pending = PendingEvents()

@@ -8,9 +8,12 @@ swift build -c release
 
 APP="dist/NetworkMonitor.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp .build/release/NetworkMonitor "$APP/Contents/MacOS/NetworkMonitor"
+
+# Bundle the helper scripts so the in-app Setup panel can run them.
+cp scripts/install-bpf-helper.sh scripts/uninstall-bpf-helper.sh "$APP/Contents/Resources/"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

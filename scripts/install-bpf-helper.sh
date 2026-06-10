@@ -13,9 +13,11 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-USER_NAME="${SUDO_USER:-$(logname 2>/dev/null)}"
+# Target user: explicit $1 (passed by the in-app installer, which runs us as
+# root via osascript), else the invoking sudo user.
+USER_NAME="${1:-${SUDO_USER:-$(logname 2>/dev/null)}}"
 if [ -z "$USER_NAME" ] || [ "$USER_NAME" = "root" ]; then
-    echo "Could not determine your user account. Run via sudo, not as root directly." >&2
+    echo "Could not determine your user account. Pass it as the first argument or run via sudo." >&2
     exit 1
 fi
 

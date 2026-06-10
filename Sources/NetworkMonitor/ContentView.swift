@@ -27,6 +27,7 @@ struct ContentView: View {
     @State private var selectedID: FlowRow.ID?
     @AppStorage("inspectorWidth") private var inspectorWidth = 360.0
     @AppStorage("viewMode") private var viewMode = ViewMode.list
+    @State private var showingSetup = false
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -66,6 +67,9 @@ struct ContentView: View {
                 statusBar(visibleCount: visible.count)
             }
             .navigationTitle("Network Monitor")
+            .sheet(isPresented: $showingSetup) {
+                SetupView().environmentObject(store)
+            }
     }
 
     @ViewBuilder
@@ -223,10 +227,19 @@ struct ContentView: View {
                 Label("Live", systemImage: "circle.fill")
                     .foregroundStyle(.green)
             }
-            dnsStatusLabel
+            Button { showingSetup = true } label: {
+                dnsStatusLabel
+            }
+            .buttonStyle(.plain)
+            .help("Open Setup")
             Spacer()
             Text("\(visibleCount) shown · \(store.rows.count) flows · \(store.totalSeen) seen")
                 .foregroundStyle(.secondary)
+            Button { showingSetup = true } label: {
+                Image(systemName: "gearshape")
+            }
+            .buttonStyle(.plain)
+            .help("Setup — hostnames & location data")
         }
         .font(.caption)
         .padding(.horizontal, 12)
@@ -244,7 +257,7 @@ struct ContentView: View {
         case .denied:
             Label("DNS names off", systemImage: "lock.fill")
                 .foregroundStyle(.secondary)
-                .help("True hostnames need BPF access. Run scripts/install-bpf-helper.sh once, then relaunch. Until then, hostnames come from reverse DNS.")
+                .help("True hostnames need BPF access. Click to open Setup and enable it. Until then, hostnames come from reverse DNS.")
         case .unavailable(let reason):
             Label("DNS names off", systemImage: "exclamationmark.triangle")
                 .foregroundStyle(.secondary)

@@ -36,6 +36,15 @@ scripts/fetch-geoip.sh   # downloads ~120MB to ~/Library/Application Support/Net
 
 Without it the app runs fine; the Map view shows "no located connections" and the inspector omits the region section. Locations are city-level estimates from IP allocation — approximate, not exact.
 
+## Setup panel
+
+Both optional capabilities below can be enabled from inside the app — click the gear (or the "DNS names" status) in the footer to open **Setup**:
+
+- **Enable true hostnames** runs the BPF helper install through the standard macOS password prompt.
+- **Download location data** fetches the GeoIP database natively with a progress bar.
+
+The command-line scripts below do the same thing if you prefer.
+
 ## True hostnames (optional)
 
 By default hostnames are best-effort reverse DNS, which often shows a CDN's name (`ec2-….amazonaws.com`) rather than the site an app actually contacted. To show the real requested hostname, the app can passively watch DNS responses — but that needs read access to BPF devices, which is root-only on macOS. Install the one-time helper (Wireshark's "ChmodBPF" approach: a LaunchDaemon that grants a dedicated `access_bpf` group access to `/dev/bpf*`):
